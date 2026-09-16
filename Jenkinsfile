@@ -1,3 +1,4 @@
+```groovy
 pipeline {
 
     agent any
@@ -24,9 +25,11 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo 'Checking out source code from GitHub...'
+
                 checkout scm
             }
         }
+
 
         stage('Python Setup') {
             steps {
@@ -41,17 +44,29 @@ pipeline {
             }
         }
 
+
         stage('Test') {
             steps {
                 echo 'Running Python tests...'
 
                 sh '''
-                    python3 -m compileall .
+                    echo "===== PYTHON COMPILE CHECK ====="
+
+                    python3 -m py_compile \
+                        main.py \
+                        audit_ledger.py \
+                        crypto_engine.py \
+                        generate_certificates.py \
+                        ocr_engine.py \
+                        test_e2e.py
+
+                    echo "===== RUNNING TESTS ====="
 
                     python3 -m pytest test_e2e.py -v
                 '''
             }
         }
+
 
         stage('SonarQube Analysis') {
             steps {
@@ -59,22 +74,30 @@ pipeline {
 
                 withSonarQubeEnv('SonarQube') {
 
-                    sh '''
-                        sonar-scanner \
-                        -Dsonar.projectKey=seclock \
-                        -Dsonar.projectName=seclock \
-                        -Dsonar.sources=. \
-                        -Dsonar.exclusions="venv/**,__pycache__/**,sample_certificates/**,.git/**"
-                    '''
+                    withEnv(["PATH+SONAR=${tool 'SonarScanner'}/bin"]) {
+
+                        sh '''
+                            echo "===== SONARQUBE SCAN ====="
+
+                            sonar-scanner \
+                            -Dsonar.projectKey=seclock \
+                            -Dsonar.projectName=seclock \
+                            -Dsonar.sources=. \
+                            -Dsonar.exclusions="venv/**,__pycache__/**,sample_certificates/**,.git/**,.pytest_cache/**"
+                        '''
+                    }
                 }
             }
         }
+
 
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
 
                 sh '''
+                    echo "===== DOCKER BUILD ====="
+
                     docker build \
                     -t ${IMAGE_NAME}:${IMAGE_TAG} \
                     -t ${IMAGE_NAME}:latest \
@@ -82,6 +105,7 @@ pipeline {
                 '''
             }
         }
+
 
         stage('Login to Amazon ECR') {
             steps {
@@ -93,6 +117,8 @@ pipeline {
                 ]) {
 
                     sh '''
+                        echo "===== ECR LOGIN ====="
+
                         aws ecr get-login-password \
                         --region ${AWS_REGION} | \
                         docker login \
@@ -103,16 +129,21 @@ pipeline {
             }
         }
 
+
         stage('Push Image to ECR') {
             steps {
                 echo 'Pushing Docker image to Amazon ECR...'
 
                 sh '''
+                    echo "===== PUSHING IMAGE TO ECR ====="
+
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
+
                     docker push ${IMAGE_NAME}:latest
                 '''
             }
         }
+
 
         stage('Deploy to EKS') {
             steps {
@@ -124,19 +155,36 @@ pipeline {
                 ]) {
 
                     sh '''
+                        echo "===== CONNECTING TO EKS ====="
+
                         aws eks update-kubeconfig \
                         --region ${AWS_REGION} \
                         --name ${EKS_CLUSTER_NAME}
 
+
+                        echo "===== CREATING NAMESPACE ====="
+
                         kubectl apply -f k8s/namespace.yaml
+
+
+                        echo "===== APPLYING DEPLOYMENT ====="
 
                         kubectl apply -f k8s/deployment.yaml
 
+
+                        echo "===== APPLYING SERVICE ====="
+
                         kubectl apply -f k8s/service.yaml
+
+
+                        echo "===== UPDATING IMAGE ====="
 
                         kubectl set image deployment/seclock-deployment \
                         seclock=${IMAGE_NAME}:${IMAGE_TAG} \
                         -n seclock
+
+
+                        echo "===== WAITING FOR ROLLOUT ====="
 
                         kubectl rollout status \
                         deployment/seclock-deployment \
@@ -146,27 +194,48 @@ pipeline {
             }
         }
 
+
         stage('Verify EKS Deployment') {
             steps {
                 echo 'Checking EKS deployment...'
 
                 sh '''
-                    echo "===== PODS ====="
+                    echo "=========================================="
+                    echo "              PODS"
+                    echo "=========================================="
+
                     kubectl get pods -n seclock
 
-                    echo "===== DEPLOYMENT ====="
+
+                    echo "=========================================="
+                    echo "           DEPLOYMENT"
+                    echo "=========================================="
+
                     kubectl get deployment -n seclock
 
-                    echo "===== SERVICE ====="
+
+                    echo "=========================================="
+                    echo "             SERVICE"
+                    echo "=========================================="
+
                     kubectl get svc -n seclock
+
+
+                    echo "=========================================="
+                    echo "          ENDPOINTS"
+                    echo "=========================================="
+
+                    kubectl get endpoints -n seclock
                 '''
             }
         }
     }
 
+
     post {
 
         success {
+
             echo '''
             ==========================================
               SECLOCK CI/CD PIPELINE SUCCESSFUL
@@ -176,11 +245,13 @@ pipeline {
                  ↓
               Jenkins
                  ↓
+              Python Setup
+                 ↓
               Python Tests
                  ↓
               SonarQube
                  ↓
-              Docker
+              Docker Build
                  ↓
               Amazon ECR
                  ↓
@@ -192,7 +263,9 @@ pipeline {
             '''
         }
 
+
         failure {
+
             echo '''
             ==========================================
               SECLOCK CI/CD PIPELINE FAILED
@@ -205,4 +278,3 @@ pipeline {
         }
     }
 }
-   
