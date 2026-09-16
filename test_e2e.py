@@ -362,22 +362,5 @@ def test_e2e():
     print("==========================================================================")
     print(" ALL 9 SECLOCK E2E VERIFICATION TESTS PASSED SUCCESSFULLY! ")
     print("==========================================================================")
-```
 
-Save it, then run:
-
-```bash
-cd ~/seclock
-python3 -m pytest test_e2e.py -v
-```
-
-If it passes, commit and push:
-
-```bash
-git add test_e2e.py
-git commit -m "Use synthetic fixtures in E2E tests"
-git push origin main
-```
-
-Then trigger the Jenkins build.
 
