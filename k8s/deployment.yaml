@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: seclock-deployment
+  namespace: seclock
+
+spec:
+
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: seclock
+
+  template:
+
+    metadata:
+      labels:
+        app: seclock
+
+    spec:
+
+      containers:
+
+        - name: seclock
+
+          image: 599499159844.dkr.ecr.ap-south-2.amazonaws.com/seclock:latest
+
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8080
+
+          resources:
+
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+
+            initialDelaySeconds: 20
+            periodSeconds: 20
