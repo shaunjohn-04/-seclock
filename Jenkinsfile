@@ -17,54 +17,41 @@ pipeline {
         IMAGE_TAG = "${BUILD_NUMBER}"
 
         EKS_CLUSTER_NAME = "beginner-cluster"
-
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
-
+                echo 'Checking out source code from GitHub...'
                 checkout scm
             }
         }
 
-
         stage('Python Setup') {
             steps {
-                echo 'Checking Python...'
+                echo 'Installing Python dependencies...'
 
                 sh '''
                     python3 --version
                     pip3 --version
 
-                    python3 -m venv venv
-
-                    . venv/bin/activate
-
-                    pip install --upgrade pip
-
-                    pip install -r requirements.txt
+                    pip3 install --break-system-packages -r requirements.txt
                 '''
             }
         }
-
 
         stage('Test') {
             steps {
                 echo 'Running Python tests...'
 
                 sh '''
-                    . venv/bin/activate
+                    python3 -m compileall .
 
-                    python -m compileall .
-
-                    python -m pytest test_e2e.py -v
+                    python3 -m pytest test_e2e.py -v
                 '''
             }
         }
-
 
         stage('SonarQube Analysis') {
             steps {
@@ -77,13 +64,11 @@ pipeline {
                         -Dsonar.projectKey=seclock \
                         -Dsonar.projectName=seclock \
                         -Dsonar.sources=. \
-                        -Dsonar.python.version=3.12 \
-                        -Dsonar.exclusions="venv/**,__pycache__/**,sample_certificates/**"
+                        -Dsonar.exclusions="venv/**,__pycache__/**,sample_certificates/**,.git/**"
                     '''
                 }
             }
         }
-
 
         stage('Build Docker Image') {
             steps {
@@ -98,124 +83,126 @@ pipeline {
             }
         }
 
-
         stage('Login to Amazon ECR') {
             steps {
-                echo 'Logging in to Amazon ECR...'
+                echo 'Logging into Amazon ECR...'
 
-                sh '''
-                    aws ecr get-login-password \
-                    --region ${AWS_REGION} | \
-                    docker login \
-                    --username AWS \
-                    --password-stdin ${ECR_REGISTRY}
-                '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-credentials']
+                ]) {
+
+                    sh '''
+                        aws ecr get-login-password \
+                        --region ${AWS_REGION} | \
+                        docker login \
+                        --username AWS \
+                        --password-stdin ${ECR_REGISTRY}
+                    '''
+                }
             }
         }
 
-
         stage('Push Image to ECR') {
             steps {
-                echo 'Pushing image to Amazon ECR...'
+                echo 'Pushing Docker image to Amazon ECR...'
 
                 sh '''
                     docker push ${IMAGE_NAME}:${IMAGE_TAG}
-
                     docker push ${IMAGE_NAME}:latest
                 '''
             }
         }
 
-
         stage('Deploy to EKS') {
             steps {
-                echo 'Deploying application to EKS...'
+                echo 'Deploying application to Amazon EKS...'
 
-                sh '''
-                    aws eks update-kubeconfig \
-                    --region ${AWS_REGION} \
-                    --name ${EKS_CLUSTER_NAME}
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-credentials']
+                ]) {
 
-                    kubectl apply \
-                    -f k8s/namespace.yaml
+                    sh '''
+                        aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${EKS_CLUSTER_NAME}
 
-                    kubectl apply \
-                    -f k8s/deployment.yaml
+                        kubectl apply -f k8s/namespace.yaml
 
-                    kubectl apply \
-                    -f k8s/service.yaml
+                        kubectl apply -f k8s/deployment.yaml
 
-                    kubectl set image \
-                    deployment/seclock-deployment \
-                    seclock=${IMAGE_NAME}:${IMAGE_TAG} \
-                    -n seclock
+                        kubectl apply -f k8s/service.yaml
 
-                    kubectl rollout status \
-                    deployment/seclock-deployment \
-                    -n seclock
-                '''
+                        kubectl set image deployment/seclock-deployment \
+                        seclock=${IMAGE_NAME}:${IMAGE_TAG} \
+                        -n seclock
+
+                        kubectl rollout status \
+                        deployment/seclock-deployment \
+                        -n seclock
+                    '''
+                }
             }
         }
 
-
         stage('Verify EKS Deployment') {
             steps {
-
-                echo 'Checking EKS resources...'
+                echo 'Checking EKS deployment...'
 
                 sh '''
                     echo "===== PODS ====="
-
                     kubectl get pods -n seclock
 
                     echo "===== DEPLOYMENT ====="
-
                     kubectl get deployment -n seclock
 
                     echo "===== SERVICE ====="
-
                     kubectl get svc -n seclock
                 '''
             }
         }
     }
 
-
     post {
 
         success {
-
             echo '''
             ==========================================
               SECLOCK CI/CD PIPELINE SUCCESSFUL
             ==========================================
+
               GitHub
                  ↓
               Jenkins
                  ↓
+              Python Tests
+                 ↓
               SonarQube
                  ↓
-              Docker Build
+              Docker
                  ↓
               Amazon ECR
                  ↓
               Amazon EKS
                  ↓
-              AWS LoadBalancer
+              LoadBalancer
+
             ==========================================
             '''
         }
 
-
         failure {
-
             echo '''
             ==========================================
               SECLOCK CI/CD PIPELINE FAILED
             ==========================================
+
               Check Jenkins Console Output
+
             ==========================================
             '''
         }
     }
 }
+   
