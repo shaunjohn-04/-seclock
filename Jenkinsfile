@@ -193,7 +193,46 @@ pipeline {
                 }
             }
         }
+stage('Verify EKS Deployment') {
+    steps {
+        echo 'Checking EKS deployment...'
 
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding',
+             credentialsId: 'aws-credentials']
+        ]) {
+
+            sh '''
+                echo "=========================================="
+                echo "              PODS"
+                echo "=========================================="
+
+                kubectl get pods -n seclock
+
+
+                echo "=========================================="
+                echo "           DEPLOYMENT"
+                echo "=========================================="
+
+                kubectl get deployment -n seclock
+
+
+                echo "=========================================="
+                echo "             SERVICE"
+                echo "=========================================="
+
+                kubectl get svc -n seclock
+
+
+                echo "=========================================="
+                echo "          ENDPOINTS"
+                echo "=========================================="
+
+                kubectl get endpoints -n seclock
+            '''
+        }
+    }
+}
 
         
 }
